@@ -56,3 +56,10 @@ Run the client in interactive development mode with hot reloading:
 cargo tauri dev
 ```
 
+To compile production binary packages, run the build command. 
+The generated .deb and .AppImage bundles will be placed in the target release directory:
+
+```bash
+cargo tauri build
+```
+
