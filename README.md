@@ -63,3 +63,24 @@ The generated .deb and .AppImage bundles will be placed in the target release di
 cargo tauri build
 ```
 
+## Troubleshooting
+
+- **Search fails or audio will not stream:** Ensure `yt-dlp` is on the latest release via `yt-dlp -U` and confirm `~/.local/bin` is exported in your environment `PATH`.
+- **Could not start mpv Error:** Verify `mpv` is installed and accessible via system path using `which mpv`.
+- **Blank window on NVIDIA drivers:** Senritsu explicitly sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` to prevent hardware DMA buffer rendering failures on WebKitGTK.
+
+---
+
+## References
+
+- [Tauri v2 Documentation](https://v2.tauri.app/)
+- [Rust Programming Language Docs](https://doc.rust-lang.org/book/)
+- [mpv Player Reference Manual](https://mpv.io/manual/master/)
+- [yt-dlp Documentation](https://github.com/yt-dlp/yt-dlp#readme)
+- [LRCLIB API Docs](https://lrclib.net/docs)
+
+---
+
+## License
+
+This project is licensed under the MIT License.
