@@ -1,5 +1,7 @@
 # Senritsu
 
+<div align="center">
+
 ![Senritsu App Screenshot](img/1.png)
 
 Customizable, ad-free native music client for Linux built with Rust and Tauri v2.
