@@ -24,7 +24,7 @@ const I = {
 let toastTimer;
 function toast(msg) {
   const el = $("#toast"); el.textContent = msg; el.classList.add("show");
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 3200);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 3400);
 }
 
 // ---------- themes ----------
@@ -47,7 +47,7 @@ const onAccent = (hex) => {
   return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#111111" : "#ffffff";
 };
 
-// ---------- adaptive accent from the cover ----------
+// ---------- adaptive accent from the cover (cached per track) ----------
 function toHex(r, g, b) { return "#" + [r, g, b].map((v) => Math.round(v).toString(16).padStart(2, "0")).join(""); }
 function vivid(r, g, b) {
   r /= 255; g /= 255; b /= 255;
@@ -84,13 +84,16 @@ function dominant(url) {
 
 // ---------- state ----------
 const S = {
-  view: "home", q: "", results: [], loading: false,
+  view: "home", lastView: null, q: "", results: [], loading: false, sid: 0,
   queue: load("queue", []), index: -1, liked: load("liked", []), recent: load("recent", []),
-  set: { theme: "midnight", accent: null, adaptive: true, blur: true, radius: 16, volume: 80, panel: true, tab: "lyrics", shuffle: false, repeat: 0, video: false, height: 720, ...load("settings", {}) },
+  set: { theme: "midnight", accent: null, adaptive: true, fx: false, radius: 16, volume: 80, panel: true, tab: "lyrics", shuffle: false, repeat: 0, video: false, vmode: "inapp", height: 720, ...load("settings", {}) },
   st: { pos: 0, dur: 0, paused: true }, lyrics: null, dragging: false, lastLy: -1, dyn: null,
+  vtoken: 0, vready: false, lastTry: null,
+  pf: new Map(), sc: new Map(), dom: new Map(), hov: null,
 };
 const cur = () => S.queue[S.index] || null;
 const isLiked = (t) => S.liked.some((x) => x.id === t.id);
+const wantEmbedded = () => S.set.video && S.set.vmode === "inapp";
 
 function applySettings() {
   const t = THEMES[S.set.theme] || THEMES.midnight, r = document.documentElement.style;
@@ -99,7 +102,8 @@ function applySettings() {
   r.setProperty("--text", t.text); r.setProperty("--muted", t.muted);
   r.setProperty("--accent", accent); r.setProperty("--on-accent", onAccent(accent));
   r.setProperty("--radius", S.set.radius + "px");
-  $("#bg").style.display = S.set.blur ? "block" : "none";
+  document.body.classList.toggle("fx", !!S.set.fx);
+  $("#bg").style.backgroundImage = S.set.fx && cur() ? `url("${cur().thumb}")` : "";
   $(".app").classList.toggle("nopanel", !S.set.panel);
   $("#tQueue").classList.toggle("on", S.set.panel && S.set.tab === "queue");
   $("#tLyrics").classList.toggle("on", S.set.panel && S.set.tab === "lyrics");
@@ -110,16 +114,76 @@ function applySettings() {
 }
 const commit = () => { save("settings", S.set); applySettings(); };
 
+// ---------- prefetch (instant starts) ----------
+function prefetch(id) {
+  const at = S.pf.get(id);
+  if (at && Date.now() - at < 2 * 3600 * 1000) return;
+  S.pf.set(id, Date.now());
+  invoke("prefetch", { id }).catch(() => S.pf.delete(id));
+}
+const prefetchNext = () => { const n = S.queue[S.index + 1]; if (n) prefetch(n.id); };
+
+// ---------- in-app video (silent <video> that follows mpv's clock) ----------
+const vid = document.createElement("video");
+vid.id = "vid"; vid.muted = true; vid.playsInline = true; vid.preload = "auto"; vid.disablePictureInPicture = true;
+vid.addEventListener("loadedmetadata", () => { vid.currentTime = S.st.pos; syncVideo(true); });
+vid.addEventListener("error", () => { if (vid.getAttribute("src")) fallbackToWindow("The webview could not play this video stream."); });
+
+function supportedCodecs() {
+  const v = document.createElement("video"), c = [];
+  if (v.canPlayType('video/webm; codecs="vp9"')) c.push("vp09");
+  if (v.canPlayType('video/mp4; codecs="avc1.640028"')) c.push("avc1");
+  if (v.canPlayType('video/mp4; codecs="av01.0.05M.08"')) c.push("av01");
+  return c;
+}
+function fallbackToWindow(msg) {
+  S.vtoken++; S.vready = false;
+  vid.pause(); vid.removeAttribute("src"); vid.load();
+  S.set.vmode = "window"; commit();
+  toast(msg + " Using the player window instead.");
+  const t = cur(); if (t) invoke("play", { ...playArgs(t, S.st.pos), fresh: false }).catch(() => {});
+  if (S.view === "now" || S.view === "style") render();
+}
+async function loadEmbedded(t) {
+  const token = ++S.vtoken;
+  vid.pause(); vid.removeAttribute("src"); vid.load(); S.vready = false;
+  if (!wantEmbedded()) return;
+  const codecs = supportedCodecs();
+  if (!codecs.length) return fallbackToWindow("This system has no web video codecs.");
+  try {
+    const url = await invoke("resolve_video", { id: t.id, height: S.set.height, codecs });
+    if (token !== S.vtoken) return;
+    S.vready = true; vid.src = url;
+  } catch (e) {
+    if (token !== S.vtoken) return;
+    fallbackToWindow("In-app video failed (" + String(e).slice(0, 70) + ").");
+  }
+}
+function syncVideo(force) {
+  if (!S.vready || S.view !== "now" || !wantEmbedded()) { if (!vid.paused) vid.pause(); return; }
+  const { pos, paused } = S.st;
+  if (paused) { if (!vid.paused) vid.pause(); if (Math.abs(vid.currentTime - pos) > 0.15) vid.currentTime = pos; return; }
+  const d = pos - vid.currentTime;
+  if (force || Math.abs(d) > 1) { vid.currentTime = pos; vid.playbackRate = 1; }
+  else if (Math.abs(d) > 0.08) vid.playbackRate = 1 + Math.max(-0.1, Math.min(0.1, d * 0.5));
+  else vid.playbackRate = 1;
+  if (vid.paused) vid.play().catch(() => {});
+}
+
 // ---------- playback ----------
-const playArgs = (t, start) => ({ id: t.id, video: S.set.video, height: S.set.height, start });
+const playArgs = (t, start) => ({ id: t.id, video: S.set.video && S.set.vmode === "window", height: S.set.height, start });
+async function startTrack(t, start, fresh) {
+  try { await invoke("play", { ...playArgs(t, start), fresh }); } catch (e) { toast(String(e)); }
+  loadEmbedded(t); prefetchNext();
+}
 async function playIndex(i) {
   if (i < 0 || i >= S.queue.length) return;
-  S.index = i; save("queue", S.queue);
+  S.index = i; S.lastTry = null; save("queue", S.queue);
   const t = S.queue[i];
   S.recent = [t, ...S.recent.filter((x) => x.id !== t.id)].slice(0, 12); save("recent", S.recent);
-  setNow(t); fetchLyrics(t); renderPanel();
+  setNow(t); fetchLyrics(t); markActive(); renderPanel();
   if (S.view === "now") render();
-  try { await invoke("play", playArgs(t, 0)); } catch (e) { toast(String(e)); }
+  startTrack(t, 0, false);
 }
 function playList(list, i) { S.queue = [...list]; playIndex(i); }
 function toggle() {
@@ -146,31 +210,59 @@ function prev() {
   if (S.st.pos > 4) return invoke("seek", { secs: 0 }).catch(() => {});
   playIndex(Math.max(0, S.index - 1));
 }
+function applyVideo() {
+  const t = cur(); if (!t) return;
+  if (S.set.video && S.set.vmode === "window") invoke("play", { ...playArgs(t, S.st.pos), fresh: false }).catch((e) => toast(String(e)));
+  else invoke("video_off").catch(() => {});
+  loadEmbedded(t);
+}
 function setVideo(on) {
   S.set.video = on; commit();
-  const t = cur();
-  if (!t) return toast(on ? "Video on. Play something to watch it" : "Video off");
-  if (on) invoke("play", playArgs(t, S.st.pos)).catch((e) => toast(String(e)));
-  else invoke("video_off").catch(() => {});
-  if (S.view === "now" || S.view === "style") render();
+  if (!cur()) { toast(on ? "Video on. Play something to watch it" : "Video off"); return; }
+  applyVideo();
+  if (on && S.set.vmode === "inapp") S.view = "now";
+  render();
 }
 function toggleLike(t) {
   if (!t) return;
   S.liked = isLiked(t) ? S.liked.filter((x) => x.id !== t.id) : [t, ...S.liked];
-  save("liked", S.liked); setNow(cur());
+  save("liked", S.liked);
+  if (S.view === "liked") render(); else refreshLikes();
 }
 function playNext(t) {
   if (S.index < 0) { S.queue.push(t); save("queue", S.queue); return playIndex(S.queue.length - 1); }
-  S.queue.splice(S.index + 1, 0, t); save("queue", S.queue); toast("Playing next"); renderPanel();
+  S.queue.splice(S.index + 1, 0, t); save("queue", S.queue); toast("Playing next"); renderPanel(); prefetchNext();
 }
 function setNow(t) {
   if (!t) return;
   $("#title").textContent = t.title; $("#artist").textContent = t.artist;
-  $("#cover").src = hq(t.thumb); $("#bg").style.backgroundImage = `url("${t.thumb}")`;
-  $("#likeNow").classList.toggle("on", isLiked(t)); $("#likeNow").innerHTML = I.heart;
+  $("#cover").src = hq(t.thumb);
+  $("#bg").style.backgroundImage = S.set.fx ? `url("${t.thumb}")` : "";
+  $("#likeNow").classList.toggle("on", isLiked(t));
   $("#ttot").textContent = fmt(t.duration);
   document.title = `${t.title} · Senritsu`;
-  if (S.set.adaptive) dominant(t.thumb).then((c) => { if (cur()?.id === t.id) { S.dyn = c; applySettings(); } });
+  if (S.set.adaptive) {
+    const hit = S.dom.get(t.id);
+    if (hit !== undefined) { S.dyn = hit; applySettings(); }
+    else dominant(t.thumb).then((c) => { S.dom.set(t.id, c); if (cur()?.id === t.id) { S.dyn = c; applySettings(); } });
+  }
+}
+
+// ---------- targeted UI updates (no full re-render) ----------
+function markActive() {
+  const c = cur();
+  document.querySelectorAll(".card,.row").forEach((el) => {
+    const t = listFor(el.dataset.ctx)[+el.dataset.i];
+    el.classList.toggle("active", !!(c && t && t.id === c.id));
+  });
+}
+function refreshLikes() {
+  document.querySelectorAll(".card,.row").forEach((el) => {
+    const t = listFor(el.dataset.ctx)[+el.dataset.i], b = el.querySelector('[data-a="like"]');
+    if (t && b) b.classList.toggle("on", isLiked(t));
+  });
+  const t = cur();
+  if (t) { $("#likeNow").classList.toggle("on", isLiked(t)); const nl = $("#nvLike"); if (nl) nl.textContent = isLiked(t) ? "Liked" : "Like"; }
 }
 
 // ---------- lyrics (lrclib.net) ----------
@@ -213,7 +305,7 @@ const listFor = (ctx) => ({ search: S.results, queue: S.queue, liked: S.liked, r
 function card(t, i, ctx) {
   const c = cur(), active = c && c.id === t.id;
   return `<div class="card ${active ? "active" : ""}" data-i="${i}" data-ctx="${ctx}">
-    <div class="thumb"><img src="${esc(hq(t.thumb))}" loading="lazy" alt="">
+    <div class="thumb"><img src="${esc(hq(t.thumb))}" loading="lazy" decoding="async" alt="">
       ${t.duration ? `<span class="dur">${fmt(t.duration)}</span>` : ""}
       <span class="playfab">${I.play}</span></div>
     <b title="${esc(t.title)}">${esc(t.title)}</b><span class="art">${esc(t.artist)}</span>
@@ -226,7 +318,7 @@ function card(t, i, ctx) {
 function row(t, i, ctx) {
   const c = cur(), active = c && c.id === t.id;
   return `<div class="row ${active ? "active" : ""}" data-i="${i}" data-ctx="${ctx}">
-    <img src="${esc(t.thumb)}" loading="lazy" alt="">
+    <img src="${esc(t.thumb)}" loading="lazy" decoding="async" alt="">
     <div class="meta"><b>${esc(t.title)}</b><span>${esc(t.artist)}</span></div>
     <div class="acts"><button data-a="like" class="${isLiked(t) ? "on" : ""}" title="Like">${I.heart}</button>
     <button data-a="remove" title="Remove">${I.close}</button></div></div>`;
@@ -238,7 +330,7 @@ function greeting() { const h = new Date().getHours(); return h < 5 ? "Late nigh
 function vHome(v) {
   if (S.loading) { v.innerHTML = '<p class="hint">Searching…</p>'; return; }
   if (S.results.length) {
-    v.innerHTML = `<h1>Results for “${esc(S.q)}”</h1><p class="hint">${S.results.length} tracks. Click a cover to play, the rest of the list becomes your queue.</p>${grid(S.results, "search")}`;
+    v.innerHTML = `<h1>Results for “${esc(S.q)}”</h1><p class="hint">${S.results.length} tracks. Click a cover to play, the rest becomes your queue.</p>${grid(S.results, "search")}`;
     return;
   }
   v.innerHTML = `<h1>${greeting()}</h1><p class="hint">Search above or pick a mood to start.</p>
@@ -248,29 +340,42 @@ function vHome(v) {
 }
 async function doSearch() {
   const q = $("#q").value.trim(); if (!q) return;
-  S.q = q; S.view = "home"; S.loading = true; render();
-  try { S.results = await invoke("search", { query: q }); } catch (e) { toast(String(e)); S.results = []; }
+  const key = q.toLowerCase(), my = ++S.sid;
+  S.q = q; S.view = "home";
+  if (S.sc.has(key)) { S.results = S.sc.get(key); S.loading = false; render(); return; }
+  S.loading = true; render();
+  try {
+    const r = await invoke("search", { query: q });
+    if (my !== S.sid) return;
+    S.sc.set(key, r); S.results = r;
+  } catch (e) { if (my !== S.sid) return; toast(String(e)); S.results = []; }
   S.loading = false; render();
 }
 function vNow(v) {
   const t = cur();
   if (!t) { v.innerHTML = '<div class="empty">Nothing playing yet</div>'; return; }
+  const emb = wantEmbedded();
   v.innerHTML = `<div class="now">
-    <div class="coverwrap" id="tilt"><div class="glow"></div>
-      <img class="bigcover" src="${esc(maxres(t.thumb))}" alt="" onerror="this.onerror=null;this.src='${esc(hq(t.thumb))}'"></div>
+    ${emb ? '<div class="vstage" id="vslot"><div class="vload">Loading video…</div></div>'
+      : `<div class="coverwrap" id="tilt"><div class="glow"></div>
+         <img class="bigcover" src="${esc(maxres(t.thumb))}" alt="" onerror="this.onerror=null;this.src='${esc(hq(t.thumb))}'"></div>`}
     <div class="nowinfo"><div class="eq"><i></i><i></i><i></i><i></i></div>
       <h1>${esc(t.title)}</h1><p>${esc(t.artist)}</p>
-      <div class="nowbtn"><button class="pri" id="nvVideo">${S.set.video ? "Close video" : "Watch video"}</button>
+      <div class="nowbtn"><button class="pri" id="nvVideo">${S.set.video ? "Hide video" : "Watch video"}</button>
       <button class="sec" id="nvLike">${isLiked(t) ? "Liked" : "Like"}</button></div></div></div>`;
-  const w = $("#tilt");
-  w.onmousemove = (e) => {
-    const r = w.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
-    w.style.transform = `perspective(900px) rotateY(${x * 14}deg) rotateX(${-y * 14}deg) scale(1.03)`;
-  };
-  w.onmouseleave = () => (w.style.transform = "");
-  w.onclick = toggle;
+  if (emb) {
+    const slot = $("#vslot"); slot.appendChild(vid); slot.onclick = toggle; syncVideo(true);
+  } else {
+    const w = $("#tilt");
+    w.onmousemove = (e) => {
+      const r = w.getBoundingClientRect(), x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
+      w.style.transform = `perspective(900px) rotateY(${x * 14}deg) rotateX(${-y * 14}deg) scale(1.03)`;
+    };
+    w.onmouseleave = () => (w.style.transform = "");
+    w.onclick = toggle;
+  }
   $("#nvVideo").onclick = () => setVideo(!S.set.video);
-  $("#nvLike").onclick = () => { toggleLike(t); render(); renderPanel(); };
+  $("#nvLike").onclick = () => toggleLike(t);
 }
 function vLiked(v) {
   v.innerHTML = `<div class="banner"><div class="bcover">${I.heart}</div><div><h1>Liked songs</h1><p>${S.liked.length} tracks</p>
@@ -284,29 +389,33 @@ function vStyle(v) {
   v.innerHTML = `<h1>Style</h1><p class="hint">Everything here saves instantly.</p>
     <div class="themes">${Object.entries(THEMES).map(([k, th]) =>
       `<button class="sw ${S.set.theme === k ? "on" : ""}" data-t="${k}" style="--c1:${th.bg};--c2:${th.accent}">${k}</button>`).join("")}</div>
-    <h2>Colors</h2>
+    <h2>Colors and effects</h2>
     <div class="setrow"><label>Adapt colors to the cover</label><input id="adaptive" type="checkbox" ${S.set.adaptive ? "checked" : ""}></div>
     <div class="setrow"><label>Fixed accent color</label><input id="accent" type="color" value="${accent}"><button id="reset" class="sec">Reset</button></div>
     <div class="setrow"><label>Corner radius</label><input id="radius" type="range" min="0" max="28" value="${S.set.radius}"></div>
-    <div class="setrow"><label>Blurred cover glow</label><input id="blur" type="checkbox" ${S.set.blur ? "checked" : ""}></div>
+    <div class="setrow"><label>Fancy effects (blur, glow)</label><input id="fx" type="checkbox" ${S.set.fx ? "checked" : ""}></div>
+    <p class="hint">Fancy effects look nicer but use more GPU. Leave them off for the fastest experience.</p>
     <h2>Video</h2>
     <div class="setrow"><label>Play video</label><input id="video" type="checkbox" ${S.set.video ? "checked" : ""}></div>
+    <div class="setrow"><label>Video output</label><select id="vmode"><option value="inapp" ${S.set.vmode === "inapp" ? "selected" : ""}>Inside the app</option><option value="window" ${S.set.vmode === "window" ? "selected" : ""}>Separate player window</option></select></div>
     <div class="setrow"><label>Maximum quality</label><select id="hq">${[480, 720, 1080, 1440, 2160].map((h) => `<option value="${h}" ${S.set.height === h ? "selected" : ""}>${h}p</option>`).join("")}</select></div>
-    <p class="hint">Video opens in its own player window. Press F there for fullscreen. Closing it keeps the music going.</p>`;
+    <p class="hint">Inside the app needs web video codecs on your system. If they are missing, Senritsu switches to the player window by itself. In the window, F is fullscreen and closing it keeps the music going.</p>`;
   v.querySelectorAll(".sw").forEach((b) => (b.onclick = () => { S.set.theme = b.dataset.t; S.set.accent = null; commit(); render(); }));
   $("#adaptive").onchange = (e) => { S.set.adaptive = e.target.checked; if (e.target.checked && cur()) setNow(cur()); else S.dyn = null; commit(); };
   $("#accent").oninput = (e) => { S.set.accent = e.target.value; commit(); };
   $("#reset").onclick = () => { S.set.accent = null; commit(); render(); };
   $("#radius").oninput = (e) => { S.set.radius = +e.target.value; commit(); };
-  $("#blur").onchange = (e) => { S.set.blur = e.target.checked; commit(); };
+  $("#fx").onchange = (e) => { S.set.fx = e.target.checked; commit(); };
   $("#video").onchange = (e) => setVideo(e.target.checked);
-  $("#hq").onchange = (e) => { S.set.height = +e.target.value; commit(); toast(`Video quality ${e.target.value}p from the next track`); };
+  $("#vmode").onchange = (e) => { S.set.vmode = e.target.value; commit(); if (S.set.video) applyVideo(); };
+  $("#hq").onchange = (e) => { S.set.height = +e.target.value; commit(); if (S.set.video && cur()) applyVideo(); };
 }
 function render() {
   document.querySelectorAll(".nav").forEach((b) => b.classList.toggle("on", b.dataset.view === S.view));
   const v = $("#view");
-  v.style.animation = "none"; void v.offsetWidth; v.style.animation = "";
+  if (S.lastView !== S.view) { v.classList.remove("enter"); void v.offsetWidth; v.classList.add("enter"); S.lastView = S.view; }
   ({ home: vHome, now: vNow, liked: vLiked, style: vStyle }[S.view])(v);
+  if (S.view !== "now") syncVideo(false);
 }
 
 // ---------- right panel ----------
@@ -349,10 +458,9 @@ document.addEventListener("click", (e) => {
   const el = e.target.closest(".card, .row"); if (!el) return;
   const ctx = el.dataset.ctx, i = +el.dataset.i, list = listFor(ctx), t = list[i]; if (!t) return;
   const a = e.target.closest("button")?.dataset.a;
-  const refresh = () => { render(); renderPanel(); };
-  if (a === "queue") { S.queue.push(t); save("queue", S.queue); toast("Added to queue"); if (S.index < 0) playIndex(S.queue.length - 1); else renderPanel(); }
+  if (a === "queue") { S.queue.push(t); save("queue", S.queue); toast("Added to queue"); if (S.index < 0) playIndex(S.queue.length - 1); else { renderPanel(); prefetchNext(); } }
   else if (a === "playnext") playNext(t);
-  else if (a === "like") { toggleLike(t); refresh(); }
+  else if (a === "like") toggleLike(t);
   else if (a === "remove") {
     if (i === S.index) return toast("Can't remove the playing track");
     S.queue.splice(i, 1); if (i < S.index) S.index--; save("queue", S.queue); renderPanel();
@@ -360,13 +468,19 @@ document.addEventListener("click", (e) => {
   else if (ctx === "queue") playIndex(i);
   else playList(list, i);
 });
+// hovering a cover for a moment resolves its stream so the click starts instantly
+document.addEventListener("mouseover", (e) => {
+  const el = e.target.closest(".card"); if (!el) return;
+  clearTimeout(S.hov);
+  S.hov = setTimeout(() => { const t = listFor(el.dataset.ctx)[+el.dataset.i]; if (t) prefetch(t.id); }, 250);
+});
 
 $("#play").onclick = toggle;
 $("#next").onclick = () => next(false);
 $("#prev").onclick = prev;
 $("#shuffle").onclick = () => { S.set.shuffle = !S.set.shuffle; commit(); };
 $("#repeat").onclick = () => { S.set.repeat = (S.set.repeat + 1) % 3; commit(); };
-$("#likeNow").onclick = () => { toggleLike(cur()); render(); renderPanel(); };
+$("#likeNow").onclick = () => toggleLike(cur());
 $("#prev").innerHTML = I.prev; $("#next").innerHTML = I.next; $("#play").innerHTML = I.play;
 $("#shuffle").innerHTML = I.shuffle; $("#repeat").innerHTML = I.repeat; $("#likeNow").innerHTML = I.heart;
 
@@ -397,11 +511,18 @@ listen("player-state", (e) => {
     seek.value = p; seek.style.setProperty("--p", p / 10 + "%");
   }
   if (dur) $("#ttot").textContent = fmt(dur);
-  syncLyrics();
+  syncLyrics(); syncVideo(false);
 });
 listen("player-ended", () => next(true));
-listen("player-error", (e) => { toast(String(e.payload)); next(false); });
-listen("video-closed", () => { S.set.video = false; commit(); if (S.view === "now" || S.view === "style") render(); toast("Video window closed, music keeps playing"); });
+listen("player-error", async (e) => {
+  const t = cur();
+  if (t && S.lastTry !== t.id) { // a cached direct stream may have expired: retry once the slow way
+    S.lastTry = t.id;
+    try { await invoke("play", { ...playArgs(t, 0), fresh: true }); return; } catch {}
+  }
+  toast(String(e.payload)); next(false);
+});
+listen("video-closed", () => { if (S.set.vmode === "window") { S.set.video = false; commit(); if (S.view === "now" || S.view === "style") render(); toast("Video window closed, music keeps playing"); } });
 listen("media-key", (e) => ({ toggle, next: () => next(false), prev }[e.payload] || (() => {}))());
 
 document.addEventListener("keydown", (e) => {
@@ -418,6 +539,5 @@ document.addEventListener("keydown", (e) => {
 // ---------- init ----------
 applySettings();
 vol.value = S.set.volume; vol.style.setProperty("--p", S.set.volume + "%");
-$("#likeNow").innerHTML = I.heart;
 invoke("set_volume", { v: S.set.volume }).catch((e) => toast(String(e))); // also reports a missing mpv
 render(); renderPanel();

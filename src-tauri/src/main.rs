@@ -16,8 +16,9 @@ fn valid_id(id: &str) -> bool {
     id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Plays a track. With `video` on, mpv opens its own video window and picks
-/// the best video up to `height` plus the best audio. Otherwise audio only.
+/// Plays a track. Uses a prefetched direct stream when available (instant start),
+/// otherwise lets mpv resolve the watch URL. With `video` on, mpv opens its own
+/// video window (best video up to `height` plus best audio).
 #[tauri::command]
 fn play(
     player: State<Player>,
@@ -25,9 +26,13 @@ fn play(
     video: bool,
     height: u32,
     start: f64,
+    fresh: bool,
 ) -> Result<(), String> {
     if !valid_id(&id) {
         return Err("Invalid video id".into());
+    }
+    if fresh {
+        ytdlp::forget(&id);
     }
     let h = height.clamp(144, 2160);
     let fmt = if video {
@@ -37,16 +42,51 @@ fn play(
     };
     let vid = if video { "auto" } else { "no" };
     let win = if video { "yes" } else { "no" };
+
+    let watch = format!("https://www.youtube.com/watch?v={id}");
+    let target = match (video, ytdlp::cached(&id)) {
+        (false, Some(s)) => {
+            if let Some(ua) = s.ua {
+                player.send(json!(["set_property", "user-agent", ua]))?;
+            }
+            s.url
+        }
+        _ => watch,
+    };
+
     player.send(json!(["set_property", "ytdl-format", fmt]))?;
     player.send(json!(["set_property", "vid", vid]))?;
     player.send(json!(["set_property", "force-window", win]))?;
     player.send(json!(["set_property", "start", format!("{:.1}", start.max(0.0))]))?;
-    player.send(json!([
-        "loadfile",
-        format!("https://www.youtube.com/watch?v={id}"),
-        "replace"
-    ]))?;
+    player.send(json!(["loadfile", target, "replace"]))?;
     player.send(json!(["set_property", "pause", false]))
+}
+
+/// Resolves and caches the stream of a track in the background.
+#[tauri::command]
+async fn prefetch(id: String) -> Result<(), String> {
+    if !valid_id(&id) {
+        return Err("Invalid video id".into());
+    }
+    if ytdlp::cached(&id).is_some() {
+        return Ok(());
+    }
+    let r = tauri::async_runtime::spawn_blocking(move || ytdlp::resolve_audio(&id).map(|_| ()))
+        .await
+        .map_err(|e| e.to_string())?;
+    r
+}
+
+/// Direct video-only URL for the in-app <video> element.
+#[tauri::command]
+async fn resolve_video(id: String, height: u32, codecs: Vec<String>) -> Result<String, String> {
+    if !valid_id(&id) {
+        return Err("Invalid video id".into());
+    }
+    let r = tauri::async_runtime::spawn_blocking(move || ytdlp::resolve_video(&id, height, &codecs))
+        .await
+        .map_err(|e| e.to_string())?;
+    r
 }
 
 /// Closes the video window but keeps the audio playing.
@@ -144,6 +184,8 @@ fn main() {
         )
         .invoke_handler(tauri::generate_handler![
             play,
+            prefetch,
+            resolve_video,
             video_off,
             toggle_pause,
             seek,

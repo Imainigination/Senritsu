@@ -47,6 +47,8 @@ impl Player {
             "--ytdl-format=bestaudio/best".into(),
             "--volume=80".into(),
             "--osc=yes".into(),
+            "--cache=yes".into(),
+            "--cache-secs=30".into(),
             "--input-default-bindings=no".into(),
             "--autofit-larger=80%x80%".into(),
             "--title=${media-title} · Senritsu".into(),
