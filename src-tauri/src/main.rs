@@ -16,17 +16,44 @@ fn valid_id(id: &str) -> bool {
     id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
+/// Plays a track. With `video` on, mpv opens its own video window and picks
+/// the best video up to `height` plus the best audio. Otherwise audio only.
 #[tauri::command]
-fn play(player: State<Player>, id: String) -> Result<(), String> {
+fn play(
+    player: State<Player>,
+    id: String,
+    video: bool,
+    height: u32,
+    start: f64,
+) -> Result<(), String> {
     if !valid_id(&id) {
         return Err("Invalid video id".into());
     }
+    let h = height.clamp(144, 2160);
+    let fmt = if video {
+        format!("bestvideo[height<=?{h}]+bestaudio/best[height<=?{h}]/best")
+    } else {
+        "bestaudio/best".to_string()
+    };
+    let vid = if video { "auto" } else { "no" };
+    let win = if video { "yes" } else { "no" };
+    player.send(json!(["set_property", "ytdl-format", fmt]))?;
+    player.send(json!(["set_property", "vid", vid]))?;
+    player.send(json!(["set_property", "force-window", win]))?;
+    player.send(json!(["set_property", "start", format!("{:.1}", start.max(0.0))]))?;
     player.send(json!([
         "loadfile",
         format!("https://www.youtube.com/watch?v={id}"),
         "replace"
     ]))?;
     player.send(json!(["set_property", "pause", false]))
+}
+
+/// Closes the video window but keeps the audio playing.
+#[tauri::command]
+fn video_off(player: State<Player>) -> Result<(), String> {
+    player.send(json!(["set_property", "vid", "no"]))?;
+    player.send(json!(["set_property", "force-window", "no"]))
 }
 
 #[tauri::command]
@@ -117,6 +144,7 @@ fn main() {
         )
         .invoke_handler(tauri::generate_handler![
             play,
+            video_off,
             toggle_pause,
             seek,
             set_volume,

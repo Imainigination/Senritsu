@@ -1,101 +1,70 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Senritsu</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <div id="bg"></div>
-    <div class="app">
-      <header class="top">
-        <div class="logo"><i></i>senritsu</div>
-        <div class="search">
-          <svg viewBox="0 0 24 24">
-            <path
-              d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 14 15.5l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"
-            />
-          </svg>
-          <input
-            id="q"
-            placeholder="Search songs, artists…"
-            autocomplete="off"
-          />
-        </div>
-        <div class="topspace"></div>
-      </header>
+<head>
+  <meta charset="utf-8">
+  <title>Senritsu</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="bg"></div>
+  <div class="app">
+    <header class="top">
+      <div class="logo"><i></i>senritsu</div>
+      <div class="search">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.8l-.3-.3A6.5 6.5 0 1 0 14 15.5l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z"/></svg>
+        <input id="q" placeholder="Search songs, artists, videos…" autocomplete="off">
+        <kbd>/</kbd>
+      </div>
+      <div class="topspace"></div>
+    </header>
 
-      <nav class="rail">
-        <button class="nav" data-view="home" title="Home / Search">
-          <svg viewBox="0 0 24 24">
-            <path d="M12 3 2 12h3v8h5v-6h4v6h5v-8h3z" />
-          </svg>
-        </button>
-        <button class="nav" data-view="now" title="Now playing">
-          <svg viewBox="0 0 24 24">
-            <path
-              d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 11a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"
-            />
-          </svg>
-        </button>
-        <button class="nav" data-view="liked" title="Liked">
-          <svg viewBox="0 0 24 24">
-            <path
-              d="m12 21-1.5-1.3C5.4 15.4 2 12.3 2 8.5 2 5.4 4.4 3 7.5 3c1.7 0 3.4.8 4.5 2.1C13.1 3.8 14.800 3 16.500 3 19.600 3 22 5.400 22 8.500c0 3.800-3.400 6.900-8.500 11.200z"
-            />
-          </svg>
-        </button>
-        <button class="nav" data-view="themes" title="Themes">
-          <svg viewBox="0 0 24 24">
-            <path
-              d="M12 3a9 9 0 0 0 0 18c1.100 0 2-.9 2-2 0-.5-.2-1-.5-1.300-.3-.3-.5-.8-.5-1.300 0-1.100.9-2 2-2H17a4 4 0 0 0 4-4c0-4.400-4-8-9-8zM6.500 12a1.500 1.500 0 1 1 0-3 1.500 1.500 0 0 1 0 3zm3-4a1.500 1.500 0 1 1 0-3 1.500 1.500 0 0 1 0 3zm5 0a1.500 1.500 0 1 1 0-3 1.500 1.500 0 0 1 0 3zm3 4a1.500 1.500 0 1 1 0-3 1.500 1.500 0 0 1 0 3z"
-            />
-          </svg>
-        </button>
-      </nav>
+    <nav class="rail">
+      <button class="nav" data-view="home" title="Home"><svg viewBox="0 0 24 24"><path d="M12 3 2 12h3v8h5v-6h4v6h5v-8h3z"/></svg></button>
+      <button class="nav" data-view="now" title="Now playing"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 11a2 2 0 1 1 0-4 2 2 0 0 1 0 4z"/></svg></button>
+      <button class="nav" data-view="liked" title="Liked songs"><svg viewBox="0 0 24 24"><path d="m12 21-1.5-1.3C5.4 15.4 2 12.3 2 8.5 2 5.4 4.4 3 7.5 3c1.7 0 3.4.8 4.5 2.1C13.1 3.8 14.8 3 16.5 3 19.6 3 22 5.4 22 8.5c0 3.8-3.4 6.9-8.5 11.2z"/></svg></button>
+      <button class="nav" data-view="style" title="Style and settings"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 0 0 0 18c1.1 0 2-.9 2-2 0-.5-.2-1-.5-1.3-.3-.3-.5-.8-.5-1.3 0-1.1.9-2 2-2H17a4 4 0 0 0 4-4c0-4.400-4-8-9-8zM6.500 12a1.500 1.500 0 1 1 0-3 1.500 1.500 0 0 1 0 3zm3-4a1.500 1.500 0 1 1 0-3 1.500 1.500 0 0 1 0 3zm5 0a1.500 1.500 0 1 1 0-3 1.500 1.500 0 0 1 0 3zm3 4a1.500 1.500 0 1 1 0-3 1.500 1.500 0 0 1 0 3z"/></svg></button>
+    </nav>
 
-      <main id="view"></main>
+    <main id="view"></main>
 
-      <aside id="panel">
-        <div class="tabs">
-          <button class="tab" data-tab="queue">Queue</button>
-          <button class="tab" data-tab="lyrics">Lyrics</button>
-        </div>
-        <div id="pbody"></div>
-      </aside>
+    <aside id="panel">
+      <div class="tabs">
+        <button class="tab" data-tab="queue">Queue</button>
+        <button class="tab" data-tab="lyrics">Lyrics</button>
+      </div>
+      <div id="pbody"></div>
+    </aside>
 
-      <footer class="bar">
-        <div class="np">
-          <img id="cover" alt="" />
-          <div class="npmeta">
-            <b id="title">Nothing playing</b
-            ><span id="artist">Search for a song</span>
-          </div>
-          <button id="likeNow" class="ico" title="Like">♥</button>
+    <footer class="bar">
+      <div class="np">
+        <img id="cover" alt="" title="Open now playing">
+        <div class="npmeta"><b id="title">Nothing playing</b><span id="artist">Search for a song</span></div>
+        <button id="likeNow" class="ico" title="Like"></button>
+      </div>
+      <div class="center">
+        <div class="ctrl">
+          <button id="shuffle" class="ico sm" title="Shuffle"></button>
+          <button id="prev" class="ico"></button>
+          <button id="play" class="ico big"></button>
+          <button id="next" class="ico"></button>
+          <button id="repeat" class="ico sm" title="Repeat"></button>
         </div>
-        <div class="center">
-          <div class="ctrl">
-            <button id="shuffle" class="ico sm" title="Shuffle"></button>
-            <button id="prev" class="ico"></button>
-            <button id="play" class="ico big"></button>
-            <button id="next" class="ico"></button>
-            <button id="repeat" class="ico sm" title="Repeat"></button>
-          </div>
-          <div class="seekrow">
-            <span id="tcur">0:00</span>
-            <input id="seek" type="range" min="0" max="1000" value="0" />
-            <span id="ttot">0:00</span>
-          </div>
+        <div class="seekrow">
+          <span id="tcur">0:00</span>
+          <input id="seek" type="range" min="0" max="1000" value="0">
+          <span id="ttot">0:00</span>
         </div>
-        <div class="vol">
-          <button id="tQueue" class="pill">Queue</button>
-          <button id="tLyrics" class="pill">Lyrics</button>
-          <input id="vol" type="range" min="0" max="100" value="80" />
-        </div>
-      </footer>
-    </div>
-    <div id="toast"></div>
-    <script src="app.js"></script>
-  </body>
+      </div>
+      <div class="vol">
+        <button id="tVideo" class="pill" title="Watch the video (opens a player window)">Video</button>
+        <button id="tQueue" class="pill">Queue</button>
+        <button id="tLyrics" class="pill">Lyrics</button>
+        <input id="vol" type="range" min="0" max="100" value="80">
+      </div>
+    </footer>
+  </div>
+  <div id="toast"></div>
+  <script src="app.js"></script>
+</body>
 </html>

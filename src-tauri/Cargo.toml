@@ -1,6 +1,6 @@
 [package]
 name = "senritsu"
-version = "0.2.0"
+version = "0.3.0"
 description = "Customizable, ad-free native YouTube Music client for Linux"
 edition = "2021"
 license = "MIT"

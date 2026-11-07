@@ -7,7 +7,19 @@ use std::{
     thread,
     time::Duration,
 };
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+
+// Minimal key bindings for the optional video window. Closing the window
+// must not quit mpv, so it is turned into a message that Senritsu handles.
+const INPUT_CONF: &str = "CLOSE_WIN script-message senritsu-close\n\
+q ignore\n\
+Q ignore\n\
+f cycle fullscreen\n\
+ESC set fullscreen no\n\
+SPACE cycle pause\n\
+LEFT seek -5\n\
+RIGHT seek 5\n\
+m cycle mute\n";
 
 #[derive(Default)]
 pub struct Player {
@@ -19,18 +31,26 @@ impl Player {
     /// Spawns a headless mpv and connects to its JSON IPC socket.
     pub fn start(&self, app: AppHandle) -> Result<(), String> {
         let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-        let sock = format!("{}/senritsu-mpv-{}.sock", dir, std::process::id());
+        let pid = std::process::id();
+        let sock = format!("{dir}/senritsu-mpv-{pid}.sock");
+        let conf = format!("{dir}/senritsu-input-{pid}.conf");
         let _ = std::fs::remove_file(&sock);
+        std::fs::write(&conf, INPUT_CONF).map_err(|e| format!("Could not write input config: {e}"))?;
 
         let args: Vec<String> = vec![
             "--idle=yes".into(),
-            "--no-video".into(),
+            "--vid=no".into(),
             "--no-terminal".into(),
             "--force-window=no".into(),
             "--audio-display=no".into(),
             "--ytdl=yes".into(),
             "--ytdl-format=bestaudio/best".into(),
             "--volume=80".into(),
+            "--osc=yes".into(),
+            "--input-default-bindings=no".into(),
+            "--autofit-larger=80%x80%".into(),
+            "--title=${media-title} · Senritsu".into(),
+            format!("--input-conf={conf}"),
             format!("--input-ipc-server={sock}"),
         ];
 
@@ -117,6 +137,15 @@ fn read_loop(stream: UnixStream, app: AppHandle) {
                 }
                 pos = 0.0;
                 last = -1.0;
+            }
+            Some("client-message") => {
+                // Video window closed: keep playing audio, drop the window.
+                if v["args"][0].as_str() == Some("senritsu-close") {
+                    let p = app.state::<Player>();
+                    let _ = p.send(json!(["set_property", "vid", "no"]));
+                    let _ = p.send(json!(["set_property", "force-window", "no"]));
+                    let _ = app.emit("video-closed", ());
+                }
             }
             _ => {}
         }
