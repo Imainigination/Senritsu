@@ -48,5 +48,11 @@ chmod +x install-deps.sh
 
 ```
 
+## Development
 
+Run the client in interactive development mode with hot reloading:
+
+```bash
+cargo tauri dev
+```
 
