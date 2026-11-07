@@ -2,7 +2,11 @@
 name = "senritsu"
 version = "0.2.0"
 description = "Customizable, ad-free native YouTube Music client for Linux"
-edition = "2021"
+edilicense = "MIT"
+repository = "https://github.com/Imainigination/Senritsu"
+homepage = "https://github.com/Imainigination/Senritsu"
+keywords = ["music", "youtube", "tauri", "linux"]
+categories = ["multimedia::audio"]tion = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
